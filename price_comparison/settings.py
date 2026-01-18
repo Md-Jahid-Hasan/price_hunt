@@ -25,7 +25,7 @@ SECRET_KEY = 'django-insecure-v*5tt3zm&3f0ky3&0saitr_bbo2%u&&20*5ietw=trxajmoufw
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["*"]
 
 # Application definition
 
@@ -57,7 +57,7 @@ MIDDLEWARE = [
 ROOT_URLCONF = 'price_comparison.urls'
 
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000"
+    "http://localhost:3000", "http://56.228.24.214"
 ]
 
 TEMPLATES = [

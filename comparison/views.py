@@ -47,3 +47,4 @@ class ProductComparisonView(APIView):
 
 
 # uvicorn price_comparison.asgi:application --host 0.0.0.0 --port 8000
+# gunicorn --bind 0.0.0.0:8000 price_comparison.asgi:application -w 3 -k uvicorn.workers.UvicornWorker

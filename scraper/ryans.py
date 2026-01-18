@@ -18,9 +18,18 @@ class GenericProductStrategy(ProductDetailStrategy):
     async def extract(self, product_url: str, context):
         logger.info(f"Fetching product details from {product_url}")
         page = await context.new_page()
-        response = await page.goto(product_url)
-        logger.warning(f"Received async response status: {response.status} for URL: {product_url}")
-        content = await page.content()
+        page.set_default_navigation_timeout(30_000)
+
+        try:
+            response = await page.goto(product_url, timeout=30_000, wait_until='domcontentloaded')
+            logger.warning(f"Received async response status: {response.status} for URL: {product_url}")
+            content = await page.content()
+            await page.close()
+        except Exception as e:
+            logger.error(f"Error fetching product details from {product_url}: {str(e)}")
+            await page.close()
+            return {}
+
         soup = BeautifulSoup(content, 'html.parser')
 
         # Extract product details

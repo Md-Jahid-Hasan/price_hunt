@@ -113,7 +113,7 @@ class ProductDetailExtractor:
                 return await asyncio.gather(*tasks)
         elif self.strategy_factory.client_type == "playwright":
             async with async_playwright() as session:
-                browser = await session.chromium.launch(headless=True)
+                browser = await session.chromium.launch()
                 context = await browser.new_context(
                     user_agent='Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0')
                 for product in products:

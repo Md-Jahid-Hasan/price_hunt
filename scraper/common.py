@@ -1,9 +1,10 @@
-import aiohttp
-import asyncio
-import time
+import aiohttp, asyncio, time, os
 from typing import Dict, Any, List, TypedDict
 from abc import ABC, abstractmethod
 from playwright.async_api import async_playwright
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 class ProductData(TypedDict):
@@ -123,7 +124,8 @@ class ProductDetailExtractor:
         self.rate_limiter = rate_limiter
         self.strategy_factory = strategy_factory()
         self.logger = logger
-        self._playwright_sem = asyncio.Semaphore(1)
+        playwright_concurrency = int(os.getenv('PLAYWRIGHT_CONCURRENCY', '1'))
+        self._playwright_sem = asyncio.Semaphore(playwright_concurrency)
 
     async def extract_details(self, products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         tasks = []

@@ -123,6 +123,7 @@ class ProductDetailExtractor:
         self.rate_limiter = rate_limiter
         self.strategy_factory = strategy_factory()
         self.logger = logger
+        self._playwright_sem = asyncio.Semaphore(1)
 
     async def extract_details(self, products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         tasks = []
@@ -186,7 +187,8 @@ class ProductDetailExtractor:
         try:
             # Get detailed info using appropriate strategy
             strategy = self.strategy_factory.create_strategy("generic")
-            details = await strategy.extract(result["url"], session)
+            async with self._playwright_sem:
+                details = await strategy.extract(result["url"], session)
             result.update(details)
         except Exception as e:
             self.logger.error(f"Error extracting details for {result['url']}: {str(e)}")

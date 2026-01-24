@@ -25,7 +25,6 @@ class GenericProductStrategy(ProductDetailStrategy):
             content = await page.content()
         except Exception as e:
             logger.error(f"Error fetching product details from {product_url}: {str(e)}")
-            await page.close()
             return {}
         finally:
             await page.close()

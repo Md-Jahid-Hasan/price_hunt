@@ -1,9 +1,8 @@
-import aiohttp
+import gc
 import asyncio
 import logging
 from typing import List, Dict, Any
 from bs4 import BeautifulSoup
-from playwright.async_api import async_playwright
 
 from .common import RateLimiter, AsyncCallAPIClient, ProductDetailStrategy, ProductDetailExtractor
 
@@ -79,7 +78,7 @@ class RyansScraper:
                 return []
             soup = BeautifulSoup(search_result, 'html.parser')
             products = soup.find_all("a", class_="snize-item")
-            # TODO: need to handle out of stock products. https://www.ryans.com/gigabyte-aorus-geforce-rtx-5090-master-ice-32g-32gb-gddr7-graphics-card
+            # TODO: need to handle comming soon products
             for product in products:
                 if product and product.get("href"):
                     all_products.extend([{"href": product.get("href")}])
@@ -87,7 +86,9 @@ class RyansScraper:
         logger.info(f"Found total of {len(all_products)} products")
 
         # Extract detailed information for each product
-        return await self.extractor.extract_details(all_products)
+        result = await self.extractor.extract_details(all_products)
+        gc.collect()
+        return result
 
 
 async def main():

@@ -43,10 +43,27 @@ class AsyncCallAPIClient:
 
     async def search(self, query: str, page: int = 1) -> str | Dict[str, Any]:
         await self.rate_limiter.wait()
+        browser = None
         try:
             async with async_playwright() as p:
-                browser = await p.chromium.launch()
-                context = await browser.new_context(user_agent='Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0')
+                browser = await p.firefox.launch(
+                    headless=True,
+                    args=[
+                        '--disable-dev-shm-usage',  # Important for low memory
+                        '--disable-gpu',
+                        '--no-sandbox',
+                        '--disable-setuid-sandbox',
+                        '--disable-software-rasterizer',
+                        '--disable-extensions',
+                        '--disable-background-networking',
+                        '--disable-default-apps',
+                        '--disable-sync',
+                        '--single-process',  # Use single process (saves memory)
+                        '--memory-pressure-off',
+                    ]
+                )
+                context = await browser.new_context(
+                    user_agent='Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0')
                 page_obj = await context.new_page()
                 page_obj.set_default_navigation_timeout(30_000)
                 url = f"{self.base_url}?keyword={query}"
@@ -58,6 +75,9 @@ class AsyncCallAPIClient:
         except Exception as e:
             self.logger.error(f"Search error: {str(e)}")
             return False
+        finally:
+            if browser:
+                await browser.close()
 
 
 class SearchAPIClient:
@@ -112,13 +132,44 @@ class ProductDetailExtractor:
                     tasks.append(self._process_product(product, session))
                 return await asyncio.gather(*tasks)
         elif self.strategy_factory.client_type == "playwright":
-            async with async_playwright() as session:
-                browser = await session.chromium.launch()
-                context = await browser.new_context(
-                    user_agent='Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0')
-                for product in products:
-                    tasks.append(self._process_product(product, context))
-                return await asyncio.gather(*tasks)
+            browser = None
+            try:
+                async with async_playwright() as session:
+                    browser = await session.firefox.launch(
+                        headless=True,
+                        args=[
+                            "--disable-gpu",
+                            "--disable-dev-shm-usage",
+                            "--no-sandbox",
+                            "--disable-setuid-sandbox",
+                            "--disable-background-networking",
+                            "--disable-default-apps",
+                            "--disable-extensions",
+                            "--disable-sync",
+                            "--disable-translate",
+                            "--metrics-recording-only",
+                            "--mute-audio",
+                            "--no-first-run",
+                            "--disable-features=site-per-process"
+                        ]
+                    )
+                    context = await browser.new_context(
+                        viewport={"width": 1366, "height": 768}, java_script_enabled=True
+                    )
+                    await context.route(
+                        "**/*",
+                        lambda route: route.abort() if route.request.resource_type in ["image", "stylesheet", "font",
+                                                                                       "media"] else route.continue_())
+                    for product in products:
+                        tasks.append(self._process_product(product, context))
+                    result = await asyncio.gather(*tasks)
+            except Exception as e:
+                self.logger.error(f"Error initializing Playwright browser context: {str(e)}")
+                result = []
+            finally:
+                if browser:
+                    await browser.close()
+            return result
 
     async def _process_product(self, product: Dict[str, Any], session) -> Dict[str, Any]:
         await self.rate_limiter.wait()

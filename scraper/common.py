@@ -187,7 +187,10 @@ class ProductDetailExtractor:
         try:
             # Get detailed info using appropriate strategy
             strategy = self.strategy_factory.create_strategy("generic")
-            async with self._playwright_sem:
+            if self.strategy_factory.client_type == "playwright":
+                async with self._playwright_sem:
+                    details = await strategy.extract(result["url"], session)
+            else:
                 details = await strategy.extract(result["url"], session)
             result.update(details)
         except Exception as e:

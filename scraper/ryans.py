@@ -34,9 +34,7 @@ class GenericProductStrategy(ProductDetailStrategy):
 
         # Extract product details
         name = soup.find('h1', attrs={"itemprop": "name"}).get_text(strip=True)
-        price_tag = soup.find('span', class_="new-sp-text")
-        if not price_tag:
-            price_tag = soup.find('span', class_="stock-text")
+        price_tag = soup.select_one("span.stock-text, span.comming-soon-font, span.new-sp-text")
         description = soup.find("div", class_="short-desc-attr").find("ul")
         if description:
             description.attrs.pop("class", None)

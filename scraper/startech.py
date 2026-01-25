@@ -1,81 +1,92 @@
-import json
-import aiohttp
-import asyncio
-import logging
-from typing import List, Dict, Any
+import json, gc, aiohttp, asyncio, logging
+
 from bs4 import BeautifulSoup
 
-from .common import RateLimiter, SearchAPIClient, ProductDetailStrategy, ProductDetailExtractor
+from .common import HttpClientFetcher, PlaywrightClientFetcher, SmartFetcher
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("StarTechScraper")
 
 
-class GenericProductStrategy(ProductDetailStrategy):
-    """Generic strategy for all product details"""
-
-    async def extract(self, product_url: str, session: aiohttp.ClientSession) -> Dict[str, Any]:
-        logger.info(f"Fetching product details from {product_url}")
-        async with session.get(product_url) as response:
-            logger.warning(f"Received response status: {response.status} for URL: {product_url}")
-            response.raise_for_status()
-            html = await response.text()
-            soup = BeautifulSoup(html, 'html.parser')
-
-            # Extract product details
-            specs = {}
-            name = soup.find('h1', class_="product-name").get_text(strip=True)
-            price = soup.find('td', class_="product-price")
-            if price.find("ins"):
-                price = price.find("ins").get_text(strip=True)
-            else:
-                price = price.get_text(strip=True)
-            description = soup.find("div", class_="short-description").find("ul")
-
-            return {
-                "name": name,
-                "price": price,
-                "description": str(description if description else ""),
-            }
-
-
-class ProductStrategyFactory:
-    """Factory for creating product detail strategy"""
-    def __init__(self):
-        self.client_type = "aiohttp"
-
-    def create_strategy(self, category: str) -> ProductDetailStrategy:
-        # No specific strategies needed, always return generic
-        return GenericProductStrategy()
-
-
 class StarTechScraper:
     """Main scraper class that coordinates the entire scraping process"""
 
     def __init__(self, base_url: str = "https://www.startech.com.bd/common/search_suggestion/index"):
-        self.rate_limiter = RateLimiter(calls_per_second=2.0)
-        self.api_client = SearchAPIClient(logger, base_url)
-        self.extractor = ProductDetailExtractor(self.rate_limiter, ProductStrategyFactory, logger)
+        self.base_url = base_url
+        self.smart_fetcher = None
+
+    async def extract(self, url):
+        content = await self.smart_fetcher.fetch(url)
+        soup = BeautifulSoup(content, 'html.parser')
+
+        # Extract product details
+        name = soup.find('h1', class_="product-name").get_text(strip=True)
+        price = soup.find('td', class_="product-price")
+        if price.find("ins"):
+            price = price.find("ins").get_text(strip=True)
+        else:
+            price = price.get_text(strip=True)
+        description = soup.find("div", class_="short-description").find("ul")
+
+        return {
+            "url": url,
+            "name": name,
+            "price": price,
+            "description": str(description if description else ""),
+        }
+
+    async def extract_details(self, products):
+        tasks = []
+        for product in products:
+            if product and product.get("href"):
+                tasks.append(self.extract(product.get("href")))
+        return await asyncio.gather(*tasks)
 
     async def scrape(self, query: str, max_pages: int = 1):
         """Scrape products based on search query"""
-        all_products = []
+        try:
+            all_products = []
+            search_result = None
+            client_session = None
+            playwright_fetcher = None
+            url = f"{self.base_url}?keyword={query}"
 
-        # Fetch products from search results
-        for page in range(1, max_pages + 1):
-            search_result = await self.api_client.search(query, page)
+            # Fetch products from search results
+            try:
+                client_session = aiohttp.ClientSession()
+                http_fetcher = HttpClientFetcher(client_session, logger)
+                playwright_fetcher = PlaywrightClientFetcher(logger)
+                self.smart_fetcher = SmartFetcher(http_fetcher, playwright_fetcher, logger)
+                search_result = await self.smart_fetcher.fetch(url)
+            except Exception as e:
+                logger.error(f"Error fetching search results for query '{query}' on page {url}: {str(e)}")
+                if client_session and playwright_fetcher:
+                    await client_session.close()
+                    await playwright_fetcher.stop()
+
+            if not search_result:
+                return []
+
             search_result = json.loads(search_result)
             products = search_result.get("products", [])
             if not products:
-                break
+                return []
 
             all_products.extend([product for product in products if not product.get("type")])
+            logger.info(f"Found total of {len(all_products)} products")
 
-        logger.info(f"Found total of {len(all_products)} products")
-
-        # Extract detailed information for each product
-        return await self.extractor.extract_details(all_products)
+            # Extract detailed information for each product
+            result = await self.extract_details(all_products)
+            gc.collect()
+            return result
+        except Exception as e:
+            logger.error(f"Error during scraping process for query '{query}': {str(e)}")
+            return []
+        finally:
+            if client_session and playwright_fetcher:
+                await client_session.close()
+                await playwright_fetcher.stop()
 
 
 async def main():

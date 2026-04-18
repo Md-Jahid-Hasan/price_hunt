@@ -12,6 +12,10 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+from celery.schedules import crontab
+
+load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -40,7 +44,10 @@ INSTALLED_APPS = [
     'rest_framework',
     'corsheaders',
 
+    'django_celery_beat',
+
     'comparison',
+    'product'
 ]
 
 MIDDLEWARE = [
@@ -83,8 +90,12 @@ ASGI_APPLICATION = 'price_comparison.asgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.getenv('POSTGRES_DB', 'price_data'),
+        'USER': os.getenv('POSTGRES_USER', 'postgres'),
+        'PASSWORD': os.getenv('POSTGRES_PASSWORD', 'postgres'),
+        'HOST': os.getenv('POSTGRES_HOST', 'localhost'),
+        'PORT': os.getenv('POSTGRES_PORT', '5432'),
     }
 }
 
@@ -132,3 +143,81 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+LOGS_DIR = BASE_DIR / "logs"
+LOGS_DIR.mkdir(exist_ok=True)
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "%(asctime)s %(levelname)s %(name)s %(message)s",
+        },
+    },
+    "handlers": {
+        "ryans_file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": LOGS_DIR / "ryans.log",
+            "maxBytes": 5 * 1024 * 1024,  # 5 MB
+            "backupCount": 5,
+            "formatter": "verbose",
+        },
+        "startech_file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": LOGS_DIR / "startech.log",
+            "maxBytes": 5 * 1024 * 1024,  # 5 MB
+            "backupCount": 5,
+            "formatter": "verbose",
+        },
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "loggers": {
+        "RyansScraper": {
+            "handlers": ["ryans_file", "console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "StartechScraper": {
+            "handlers": ["startech_file", "console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
+}
+
+# Celery
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+
+from kombu import Queue
+
+CELERY_TASK_QUEUES = (
+    Queue("ryans_queue"),
+    Queue("startech_queue"),
+)
+
+CELERY_TASK_ROUTES = {
+    "product.tasks.scrape_ryans": {"queue": "ryans_queue"},
+    "product.tasks.scrape_startech": {"queue": "startech_queue"},
+}
+
+CELERY_BEAT_SCHEDULE = {
+    "scrape-ryans": {
+        "task": "product.tasks.scrape_ryans",
+        "schedule": crontab(hour=0, minute=0),  # TODO: adjust time
+        "options": {"queue": "ryans_queue"},
+    },
+    "scrape-startech": {
+        "task": "product.tasks.scrape_startech",
+        "schedule": crontab(hour=0, minute=0),  # TODO: adjust time
+        "options": {"queue": "startech_queue"},
+    },
+}

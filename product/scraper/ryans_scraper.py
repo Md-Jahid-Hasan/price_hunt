@@ -78,7 +78,8 @@ class RyansScraper(BasePaginatedScraper):
                     if not anchor:
                         continue
 
-                    name = anchor.get("data-bs-original-title") or anchor.get_text(strip=True)
+                    name = anchor.get("title") or anchor.get_text(strip=True)
+                    name = name.split("<br>")[0] if name.split("<br>") else name
                     product_url = anchor.get("href", "")
 
                     price_tag = card.find("a", class_="cat-sp-text")
@@ -96,6 +97,8 @@ class RyansScraper(BasePaginatedScraper):
                             ul.attrs.pop("class", None)
                             for tag in ul.find_all(True):
                                 tag.attrs.pop("class", None)
+                            for li in ul.find_all("li"):
+                                li.string = li.get_text(strip=True)
                             description = str(ul)
 
                     products.append(

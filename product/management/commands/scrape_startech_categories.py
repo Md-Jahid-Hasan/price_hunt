@@ -31,13 +31,12 @@ class Command(BaseCommand):
             self.stderr.write("Could not find #main-nav — Star Tech may have changed their HTML.")
             return
 
-        # Leaf items (no has-child) are actual product categories
-        # Parent items (has-child) are menu groups — skip them
+        # Select all direct li items from drop-menu-1 only.
+        # This gives "Desktop Offer", "Star PC", "Gaming PC" etc. at the right depth
+        # and naturally excludes drop-menu-2 sub-items like "Intel PC", "Ryzen PC".
         categories: list[dict] = []
 
-        for li in nav.find_all("li", class_="nav-item"):
-            if "has-child" in li.get("class", []):
-                continue
+        for li in nav.select(".drop-menu-1 > li.nav-item, .drop-menu-1 > ul > li.nav-item"):
             a = li.find("a", class_="nav-link")
             if not a:
                 continue

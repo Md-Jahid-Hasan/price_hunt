@@ -14,6 +14,7 @@ def save_categories(site_name: str, categories: list[dict]) -> tuple[int, int]:
 
     urls = [c["url"] for c in categories]
     existing_map = {c.url: c for c in Category.objects.filter(url__in=urls)}
+    print(f"Existing categories in DB: {len(existing_map)}")
 
     to_create = []
     to_update = []
@@ -35,11 +36,11 @@ def save_categories(site_name: str, categories: list[dict]) -> tuple[int, int]:
                     site=site,
                 )
             )
-
+    print(f"Prepared {len(to_create)} categories to create, {len(to_update)} to update.")
     if to_update:
         Category.objects.bulk_update(to_update, ["name", "slug", "site"])
 
     if to_create:
-        Category.objects.bulk_create(to_create, ignore_conflicts=True)
+        Category.objects.bulk_create(to_create)
 
     return len(to_create), len(to_update)

@@ -23,11 +23,15 @@ class BasePaginatedScraper(ABC):
         logger: logging.Logger,
         max_retries: int = 3,
         retry_delay: int = 2,
+        max_concurrent_categories: int = 20,
+        batch_pause: int = 5,
     ):
         self.name = name
         self.logger = logger
         self.max_retries = max_retries
         self.retry_delay = retry_delay
+        self.max_concurrent_categories = max_concurrent_categories
+        self.batch_pause = batch_pause
 
     # ------------------------------------------------------------------
     # Hooks for subclasses
@@ -157,6 +161,7 @@ class BasePaginatedScraper(ABC):
         return all_products
 
     def _save_products(self, products: list[dict[str, Any]], category: Any) -> None:
+        self.logger.info("Saving %s products for category: %s", len(products), category.url)
         from product.models import PriceHistory, Product
 
         today = timezone.now().date()
@@ -200,23 +205,51 @@ class BasePaginatedScraper(ABC):
                     )
                 )
 
-        # --- 2. Bulk write products ---
+        # --- 2. Bulk write products, fall back to row-by-row on failure ---
         if to_update:
-            Product.objects.bulk_update(
-                to_update, ["name", "slug", "price", "description", "category", "site"]
-            )
-            self.logger.info("Updated %s products for category: %s", len(to_update), category.name)
+            try:
+                Product.objects.bulk_update(
+                    to_update, ["name", "slug", "price", "description", "category", "site"]
+                )
+                self.logger.info("Updated %s products for category: %s", len(to_update), category.url)
+            except Exception as bulk_exc:
+                self.logger.warning(
+                    "Bulk update failed for category %s (%s) — falling back to row-by-row",
+                    category.url, bulk_exc,
+                )
+                for product in to_update:
+                    try:
+                        product.save()
+                    except Exception as exc:
+                        self.logger.error(
+                            "Failed to update product %s | category %s | error: %s",
+                            product.url, category.url, exc,
+                        )
 
         if to_create:
-            Product.objects.bulk_create(to_create, ignore_conflicts=True)
-            self.logger.info("Created %s products for category: %s", len(to_create), category.name)
+            try:
+                Product.objects.bulk_create(to_create, ignore_conflicts=True)
+                self.logger.info("Created %s products for category: %s", len(to_create), category.url)
+            except Exception as bulk_exc:
+                self.logger.warning(
+                    "Bulk create failed for category %s (%s) — falling back to row-by-row",
+                    category.url, bulk_exc,
+                )
+                for product in to_create:
+                    try:
+                        product.save()
+                    except Exception as exc:
+                        self.logger.error(
+                            "Failed to create product %s | category %s | error: %s",
+                            product.url, category.url, exc,
+                        )
 
         # --- 3. Re-fetch all products to get PKs (needed after bulk_create) ---
         product_map: dict[str, Any] = {
             p.url: p for p in Product.objects.filter(url__in=urls)
         }
 
-        # --- 4. Bulk create price history (one entry per product per day) ---
+        # --- 4. Bulk create price history, fall back to row-by-row on failure ---
         already_recorded_ids: set[int] = set(
             PriceHistory.objects.filter(
                 product__in=product_map.values(),
@@ -231,12 +264,25 @@ class BasePaginatedScraper(ABC):
         ]
 
         if price_histories:
-            PriceHistory.objects.bulk_create(price_histories)
-            self.logger.info(
-                "Recorded %s price history entries for category: %s",
-                len(price_histories),
-                category.name,
-            )
+            try:
+                PriceHistory.objects.bulk_create(price_histories)
+                self.logger.info(
+                    "Recorded %s price history entries for category: %s",
+                    len(price_histories), category.url,
+                )
+            except Exception as bulk_exc:
+                self.logger.warning(
+                    "Bulk price history create failed for category %s (%s) — falling back to row-by-row",
+                    category.url, bulk_exc,
+                )
+                for ph in price_histories:
+                    try:
+                        ph.save()
+                    except Exception as exc:
+                        self.logger.error(
+                            "Failed to record price history for product %s | category %s | error: %s",
+                            ph.product.url, category.url, exc,
+                        )
 
     async def _scrape_and_save_category(
         self, url: str, category: Any, fetcher: FetcherProtocol
@@ -252,16 +298,42 @@ class BasePaginatedScraper(ABC):
             self.logger.warning("No categories configured for %s", self.name)
             return []
 
+        total = len(categories)
+        batch_size = self.max_concurrent_categories
+        self.logger.info(
+            "Scraping %s categories in batches of %s with %ss pause between batches",
+            total,
+            batch_size,
+            self.batch_pause,
+        )
+
         fetcher = await self.create_fetcher()
         try:
-            tasks = [
-                self._scrape_and_save_category(category.url, category, fetcher)
-                for category in categories
-            ]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            all_results: list = []
+            for batch_start in range(0, total, batch_size):
+                batch = categories[batch_start: batch_start + batch_size]
+                batch_num = batch_start // batch_size + 1
+                self.logger.info(
+                    "Starting batch %s/%s (%s categories)",
+                    batch_num,
+                    -(-total // batch_size),
+                    len(batch),
+                )
+
+                tasks = [
+                    self._scrape_and_save_category(category.url, category, fetcher)
+                    for category in batch
+                ]
+                batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+                all_results.extend(zip(batch, batch_results))
+
+                is_last_batch = batch_start + batch_size >= total
+                if not is_last_batch:
+                    self.logger.info("Batch %s done. Pausing %ss...", batch_num, self.batch_pause)
+                    await asyncio.sleep(self.batch_pause)
 
             normalized: list[list[dict[str, Any]]] = []
-            for category, result in zip(categories, results):
+            for category, result in all_results:
                 if isinstance(result, Exception):
                     self.logger.error("Category scrape failed for %s: %s", category.url, result)
                     normalized.append([])

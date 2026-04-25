@@ -170,6 +170,13 @@ LOGGING = {
             "backupCount": 5,
             "formatter": "verbose",
         },
+        "techland_file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": LOGS_DIR / "techland.log",
+            "maxBytes": 5 * 1024 * 1024,  # 5 MB
+            "backupCount": 5,
+            "formatter": "verbose",
+        },
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "verbose",
@@ -183,6 +190,11 @@ LOGGING = {
         },
         "StartechScraper": {
             "handlers": ["startech_file", "console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "TechlandScraper": {
+            "handlers": ["techland_file", "console"],
             "level": "INFO",
             "propagate": False,
         },
@@ -202,11 +214,13 @@ from kombu import Queue
 CELERY_TASK_QUEUES = (
     Queue("ryans_queue"),
     Queue("startech_queue"),
+    Queue("techland_queue"),
 )
 
 CELERY_TASK_ROUTES = {
     "product.tasks.scrape_ryans": {"queue": "ryans_queue"},
     "product.tasks.scrape_startech": {"queue": "startech_queue"},
+    "product.tasks.scrape_techland": {"queue": "techland_queue"},
 }
 
 CELERY_BEAT_SCHEDULE = {
@@ -219,5 +233,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "product.tasks.scrape_startech",
         "schedule": crontab(hour=0, minute=0),  # TODO: adjust time
         "options": {"queue": "startech_queue"},
+    },
+    "scrape-techland": {
+        "task": "product.tasks.scrape_techland",
+        "schedule": crontab(hour=0, minute=0),  # TODO: adjust time
+        "options": {"queue": "techland_queue"},
     },
 }

@@ -50,10 +50,6 @@ class BasePaginatedScraper(ABC):
         return None
 
     @abstractmethod
-    def parse_total_pages(self, soup: BeautifulSoup) -> int:
-        """Extract total page count from the first category page."""
-
-    @abstractmethod
     def parse_products(self, soup: BeautifulSoup) -> list[dict[str, Any]]:
         """Extract products from one category page."""
 
@@ -138,26 +134,6 @@ class BasePaginatedScraper(ABC):
         next_page_link = self.get_next_page_url(soup)
         if next_page_link:
             await self.extract_data(next_page_link, fetcher, all_products)
-
-        # total_pages = self.parse_total_pages(soup)
-        # self.logger.info("Total pages detected: %s", total_pages)
-        #
-        # if total_pages <= 1:
-        #     return all_products
-        #
-        # tasks = [
-        #     self._fetch_and_parse_page(url, page, fetcher)
-        #     for page in range(2, total_pages + 1)
-        # ]
-        # results = await asyncio.gather(*tasks, return_exceptions=True)
-        #
-        # for page_num, result in enumerate(results, start=2):
-        #     if isinstance(result, Exception):
-        #         self.logger.error("Page %s failed with exception: %s", page_num, result)
-        #         continue
-        #     all_products.extend(result)
-        #
-        # self.logger.info("Total products extracted from %s: %s", url, len(all_products))
         return all_products
 
     def _save_products(self, products: list[dict[str, Any]], category: Any) -> None:

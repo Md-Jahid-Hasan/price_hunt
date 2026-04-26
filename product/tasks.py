@@ -44,3 +44,16 @@ def scrape_techland(self):
     except Exception as exc:
         logger.error("Techland scrape failed: %s", exc)
         raise self.retry(exc=exc)
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, queue="ucc_bd_queue")
+def scrape_ucc_bd(self):
+    from product.scraper.ucc_bd_scraper import UccBdScraper
+    try:
+        results = async_to_sync(UccBdScraper().scrape)()
+        total = sum(len(r) for r in results)
+        logger.info("UCC BD scrape complete: %s products across %s categories", total, len(results))
+        return {"categories": len(results), "total_products": total}
+    except Exception as exc:
+        logger.error("UCC BD scrape failed: %s", exc)
+        raise self.retry(exc=exc)

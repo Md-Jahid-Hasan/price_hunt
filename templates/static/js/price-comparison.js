@@ -2,6 +2,18 @@
 let allProducts = [];
 let filteredProducts = [];
 
+// Convert a site name to a CSS-safe slug (e.g. "Star Tech" → "star-tech")
+function slugify(name) {
+    return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+// Format a raw decimal price string as "৳ 75,000"
+function formatPrice(priceStr) {
+    const num = parseFloat(priceStr);
+    if (!num) return 'Price N/A';
+    return '৳ ' + Math.round(num).toLocaleString();
+}
+
 // Search functionality
 async function searchProducts() {
     const searchInput = document.getElementById('searchInput');
@@ -12,7 +24,6 @@ async function searchProducts() {
         return;
     }
 
-    // Show loading state
     document.getElementById('loading').classList.add('active');
     document.getElementById('resultsContainer').classList.remove('active');
     document.getElementById('emptyState').style.display = 'none';
@@ -21,7 +32,6 @@ async function searchProducts() {
     document.getElementById('resultsSummary').style.display = 'none';
 
     try {
-        // Make API call
         const response = await fetch(`/api/product-comparison/?product=${encodeURIComponent(query)}`);
 
         if (!response.ok) {
@@ -29,24 +39,18 @@ async function searchProducts() {
         }
 
         const data = await response.json();
-
-        // Hide loading
         document.getElementById('loading').classList.remove('active');
-
-        // Display results
         displayResults(data);
 
     } catch (error) {
-        console.log(error)
         document.getElementById('loading').classList.remove('active');
         showError('Failed to search products. Please try again.');
         console.error('Error:', error);
     }
 }
 
-// Display results
+// Display results — works with any number of sites
 function displayResults(data) {
-    // Check if there's an error in the response
     if (data.error) {
         showError(data.error);
         return;
@@ -54,66 +58,73 @@ function displayResults(data) {
 
     allProducts = [];
 
-    // Collect all products with store info
-    if (data.ryans && Array.isArray(data.ryans) && data.ryans.length > 0) {
-        data.ryans.forEach(p => {
-            const price = extractPrice(p.price);
-            if (price >= 0) { // Filter out products with "BDT 0" or invalid prices
-                allProducts.push({...p, store: 'ryans', storeName: 'Ryans', priceValue: price});
-            }
+    // Iterate over every site key returned by the API dynamically
+    Object.entries(data).forEach(([siteName, products]) => {
+        if (!Array.isArray(products) || products.length === 0) return;
+        const storeSlug = slugify(siteName);
+        products.forEach(p => {
+            allProducts.push({
+                ...p,
+                store: storeSlug,
+                storeName: siteName,
+                priceValue: extractPrice(p.price),
+            });
         });
-    }
-
-    if (data.startech && Array.isArray(data.startech) && data.startech.length > 0) {
-        data.startech.forEach(p => {
-            const price = extractPrice(p.price);
-            if (price >= 0) { // Filter out products with "BDT 0" or invalid prices
-                allProducts.push({...p, store: 'startech', storeName: 'Star Tech', priceValue: price});
-            }
-        });
-    }
+    });
 
     if (allProducts.length === 0) {
-        showError('No products found. Try a different search term.');
+        document.getElementById('emptyState').style.display = 'block';
         return;
     }
-    console.log(allProducts)
 
-    // Reset filters
+    populateStoreFilter();
+
     document.getElementById('storeFilter').value = 'all';
-    document.getElementById('availabilityFilter').value = 'all';
     document.getElementById('sortSelect').value = 'price-low';
 
-    // Update summary and display
     updateSummary();
     sortAndDisplayResults();
 
-    // Show controls
     document.getElementById('filterControls').style.display = 'flex';
     document.getElementById('resultsSummary').style.display = 'flex';
     document.getElementById('resultsContainer').classList.add('active');
+}
+
+// Rebuild the store filter dropdown from the current result set
+function populateStoreFilter() {
+    const storeFilter = document.getElementById('storeFilter');
+
+    // Remove only previously injected dynamic options, keep the static "All" option
+    storeFilter.querySelectorAll('option[data-dynamic]').forEach(o => o.remove());
+
+    const seen = new Set();
+    allProducts.forEach(({ store, storeName }) => {
+        if (seen.has(store)) return;
+        seen.add(store);
+        const option = document.createElement('option');
+        option.value = store;
+        option.textContent = storeName;
+        option.dataset.dynamic = '1';
+        storeFilter.appendChild(option);
+    });
 }
 
 // Sort and display results
 function sortAndDisplayResults() {
     const sortValue = document.getElementById('sortSelect').value;
     const storeFilter = document.getElementById('storeFilter').value;
-    const availabilityFilter = document.getElementById('availabilityFilter').value;
 
-    // Start with all products
     filteredProducts = [...allProducts];
 
-    // Filter by store
     if (storeFilter !== 'all') {
         filteredProducts = filteredProducts.filter(p => p.store === storeFilter);
     }
 
-    // Filter by availability (price > 0)
-    if (availabilityFilter === 'available') {
+    const availabilityFilter = document.getElementById('availabilityFilter');
+    if (availabilityFilter && availabilityFilter.value === 'available') {
         filteredProducts = filteredProducts.filter(p => p.priceValue > 0);
     }
 
-    // Sort
     if (sortValue === 'price-low') {
         filteredProducts.sort((a, b) => a.priceValue - b.priceValue);
     } else if (sortValue === 'price-high') {
@@ -122,7 +133,7 @@ function sortAndDisplayResults() {
         filteredProducts.sort((a, b) => a.storeName.localeCompare(b.storeName));
     }
 
-    // Display products
+    updateShowingCount(filteredProducts.length, storeFilter);
     displayProducts(filteredProducts);
 }
 
@@ -146,31 +157,30 @@ function createProductCard(product) {
     const card = document.createElement('div');
     card.className = 'product-card';
 
-    // Store badge
+    // Meta row: store badge + category tag
+    const metaRow = document.createElement('div');
+    metaRow.className = 'card-meta';
+
     const storeBadge = document.createElement('span');
     storeBadge.className = `store-badge badge-${product.store}`;
     storeBadge.textContent = product.storeName;
+    metaRow.appendChild(storeBadge);
 
-    // Product name
+    if (product.category) {
+        const categoryTag = document.createElement('span');
+        categoryTag.className = 'category-tag';
+        categoryTag.textContent = product.category;
+        metaRow.appendChild(categoryTag);
+    }
+
     const productName = document.createElement('div');
     productName.className = 'product-name';
     productName.textContent = product.name || 'Product Name';
 
-    // Product price
     const productPrice = document.createElement('div');
     productPrice.className = 'product-price';
-    productPrice.textContent = product.price || 'Price N/A';
+    productPrice.textContent = formatPrice(product.price);
 
-    // Specs
-    const specsDiv = document.createElement('div');
-    specsDiv.className = 'product-specs';
-    if (product.description_html) {
-        specsDiv.innerHTML = product.description_html;
-    } else if (product.description) {
-        specsDiv.innerHTML = product.description;
-    }
-
-    // Actions
     const actionsDiv = document.createElement('div');
     actionsDiv.className = 'product-actions';
 
@@ -182,31 +192,65 @@ function createProductCard(product) {
 
     actionsDiv.appendChild(viewBtn);
 
-    card.appendChild(storeBadge);
+    const toggleBtn = document.createElement('button');
+    toggleBtn.className = 'specs-toggle-btn';
+    toggleBtn.innerHTML = 'Specifications <span class="specs-chevron">&#9660;</span>';
+
+    const specsDiv = document.createElement('div');
+    specsDiv.className = 'product-specs';
+
+    const specsContent = document.createElement('div');
+    specsContent.className = 'specs-content';
+
+    const descriptionHtml = product.description_html || product.description;
+    if (descriptionHtml) {
+        specsContent.innerHTML = descriptionHtml;
+    } else {
+        specsContent.innerHTML = '<p class="specs-empty">No specifications available</p>';
+    }
+
+    specsDiv.appendChild(specsContent);
+
+    toggleBtn.addEventListener('click', () => {
+        const isOpen = specsDiv.classList.toggle('open');
+        toggleBtn.classList.toggle('open', isOpen);
+    });
+
+    card.appendChild(metaRow);
     card.appendChild(productName);
     card.appendChild(productPrice);
-    if (product.description || product.description_html) {
-        card.appendChild(specsDiv);
-    }
+    card.appendChild(toggleBtn);
+    card.appendChild(specsDiv);
     card.appendChild(actionsDiv);
 
     return card;
 }
 
-// Extract numeric price from string
+// Extract numeric price from a decimal string like "75000.00"
 function extractPrice(priceStr) {
     if (!priceStr) return 0;
-    const match = priceStr.match(/[\d,]+/);
-    if (!match) return 0;
-    const price = parseFloat(match[0].replace(/,/g, ''));
-    return price || 0;
+    return parseFloat(String(priceStr).replace(/,/g, '')) || 0;
 }
 
-// Update summary
+// Update total counters (called once per search)
 function updateSummary() {
     const stores = new Set(allProducts.map(p => p.store));
-    document.getElementById('totalStores').textContent = stores.size;
-    document.getElementById('totalProducts').textContent = allProducts.length;
+    document.getElementById('totalStores').textContent = String(stores.size);
+    document.getElementById('totalProducts').textContent = String(allProducts.length);
+    document.getElementById('showingCount').textContent = String(allProducts.length);
+    document.getElementById('showingLabel').textContent = 'Showing';
+}
+
+// Update the "Showing" counter after filters are applied
+function updateShowingCount(count, storeSlug) {
+    document.getElementById('showingCount').textContent = String(count);
+    if (storeSlug === 'all') {
+        document.getElementById('showingLabel').textContent = 'Showing';
+    } else {
+        const storeFilter = document.getElementById('storeFilter');
+        const selected = storeFilter.options[storeFilter.selectedIndex];
+        document.getElementById('showingLabel').textContent = `From ${selected.textContent}`;
+    }
 }
 
 // Show error message
@@ -214,18 +258,12 @@ function showError(message) {
     const errorDiv = document.getElementById('errorMessage');
     errorDiv.textContent = message;
     errorDiv.classList.add('active');
-
-    setTimeout(() => {
-        errorDiv.classList.remove('active');
-    }, 5000);
+    setTimeout(() => errorDiv.classList.remove('active'), 5000);
 }
 
-// Initialize event listeners when DOM is loaded
-document.addEventListener('DOMContentLoaded', function() {
-    // Search on Enter key
-    document.getElementById('searchInput').addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-            searchProducts();
-        }
+// Initialize event listeners
+document.addEventListener('DOMContentLoaded', function () {
+    document.getElementById('searchInput').addEventListener('keypress', function (e) {
+        if (e.key === 'Enter') searchProducts();
     });
 });

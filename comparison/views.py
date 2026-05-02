@@ -1,49 +1,45 @@
-import asyncio
-
 from django.shortcuts import render
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.status import HTTP_200_OK, HTTP_400_BAD_REQUEST
 
-from scraper.ryans import RyansScraper
-from scraper.startech import StarTechScraper
+from product.models import Product
 
 
 def home_page(request):
-    # render the home page template
     return render(request, 'home_page.html')
 
 
 class ProductComparisonView(APIView):
     """
-    View to handle product comparison requests.
-    This view will accept a list of product URLs and return their details.
+    Search products by keyword across all sites and return results grouped by site.
+    Query param: ?product=<keyword>
     """
 
     def get(self, request):
-        # get product name from query parameters
-        product_name = request.query_params.get('product', None)
-        if not product_name:
+        query = request.query_params.get('product', '').strip()
+        if not query:
             return Response({"error": "Product name is required"}, status=HTTP_400_BAD_REQUEST)
 
-        try:
-            # get data from get_scraped_data method
-            results = asyncio.run(self.get_scraped_data(product_name))
-            return Response(results, status=HTTP_200_OK)
-        except Exception as e:
-            return Response({"error": str(e)}, status=HTTP_400_BAD_REQUEST)
+        products = (
+            Product.objects
+            .filter(name__icontains=query)
+            .select_related('site', 'category')
+            .order_by('site__name', 'price')
+        )
 
-    async def get_scraped_data(self, product_name):
-        ryans = RyansScraper()
-        startech = StarTechScraper()
-        try:
-            startech_data, ryans_data = await asyncio.gather(startech.scrape(product_name), ryans.scrape(product_name))
-            return {
-                "startech": startech_data,
-                "ryans": ryans_data
-            }
-        except Exception as e:
-            raise e
+        results: dict[str, list] = {}
+        for product in products:
+            site_name = product.site.name if product.site else "Unknown"
+            results.setdefault(site_name, []).append({
+                "name": product.name,
+                "url": product.url,
+                "price": str(product.price),
+                "description": product.description,
+                "category": product.category.name if product.category else "",
+            })
+
+        return Response(results, status=HTTP_200_OK)
 
 
 # uvicorn price_comparison.asgi:application --host 0.0.0.0 --port 8000

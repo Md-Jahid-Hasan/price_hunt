@@ -58,8 +58,6 @@
                 <span class="filter-label">Filter Store:</span>
                 <select class="filter-select" id="storeFilter" onchange="sortAndDisplayResults()">
                     <option value="all">All Stores</option>
-                    <option value="ryans">Ryans</option>
-                    <option value="startech">Star Tech</option>
                 </select>
             </div>
             <div class="filter-group">
@@ -81,6 +79,10 @@
 
         <!-- Results Summary -->
         <div class="results-summary" id="resultsSummary" style="display: none;">
+            <div class="summary-stat">
+                <div class="stat-value" id="showingCount">0</div>
+                <div class="stat-label" id="showingLabel">Showing</div>
+            </div>
             <div class="summary-stat">
                 <div class="stat-value" id="totalProducts">0</div>
                 <div class="stat-label">Total Products</div>

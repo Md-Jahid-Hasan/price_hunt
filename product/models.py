@@ -10,6 +10,7 @@ class Site(models.Model):
 
 class Category(models.Model):
     site = models.ForeignKey(Site, on_delete=models.SET_NULL, related_name='categories', null=True)
+    parent = models.ForeignKey('self', on_delete=models.SET_NULL, related_name='subcategories', null=True, blank=True)
     name = models.CharField(max_length=100)
     slug = models.SlugField(max_length=255)
     url = models.URLField(unique=True)
@@ -22,6 +23,24 @@ class Category(models.Model):
         if not self.slug:
             self.slug = slugify(self.name)
         super().save(*args, **kwargs)
+
+    def deactivate_children(self) -> int:
+        """
+        Recursively sets is_active=False on all descendant categories.
+        Returns the total number of categories updated.
+        """
+        # Collect all descendant IDs via BFS to avoid deep recursion
+        ids_to_deactivate = []
+        queue = list(self.subcategories.values_list('id', flat=True))
+        while queue:
+            ids_to_deactivate.extend(queue)
+            queue = list(
+                Category.objects.filter(parent_id__in=queue)
+                .values_list('id', flat=True)
+            )
+        if not ids_to_deactivate:
+            return 0
+        return Category.objects.filter(id__in=ids_to_deactivate).update(is_active=False)
 
 
 class Product(models.Model):

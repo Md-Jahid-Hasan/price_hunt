@@ -1,6 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
 from django.core.management.base import BaseCommand
+from django.utils.text import slugify
 
 from product.models import Site
 
@@ -8,7 +9,7 @@ from ._category_utils import save_categories
 
 
 class Command(BaseCommand):
-    help = "Scrape second-level product categories from UCC BD and save to the database."
+    help = "Scrape all product categories from UCC BD (L1 → L2 → L3 → L4) and save to the database."
 
     def handle(self, *args, **options):
         site = Site.objects.filter(name="UCC BD").first()
@@ -27,7 +28,6 @@ class Command(BaseCommand):
 
         soup = BeautifulSoup(response.text, "html.parser")
 
-        # The nav is inside li.main-menu-item > div > div.flyout-menu > ul.j-menu
         nav_li = soup.find("li", class_="main-menu-item")
         if not nav_li:
             self.stderr.write("Could not find li.main-menu-item — UCC BD may have changed their HTML.")
@@ -45,41 +45,87 @@ class Command(BaseCommand):
 
         categories: list[dict] = []
 
-        for flyout_li in top_ul.find_all("li", class_="flyout-menu-item", recursive=False):
-            # Check for a direct L2 submenu (div.j-dropdown > ul.j-menu)
-            inner_div = flyout_li.find("div", class_="j-dropdown", recursive=False)
+        for l1_li in top_ul.find_all("li", class_="flyout-menu-item", recursive=False):
+            l1_a = l1_li.find("a", recursive=False)
+            if not l1_a:
+                continue
+            l1_href: str = l1_a.get("href", "")
+            l1_span = l1_a.find("span", class_="links-text")
+            l1_name: str = l1_span.get_text(strip=True) if l1_span else l1_a.get_text(strip=True)
+            if not l1_href.startswith(site.url) or not l1_name:
+                continue
 
-            if inner_div:
-                inner_ul = inner_div.find("ul", class_="j-menu")
-                if not inner_ul:
+            l1_slug = slugify(l1_name)
+            print(l1_slug)
+            categories.append({"name": l1_name, "url": l1_href, "parent_url": None, "slug": l1_slug})
+
+            l1_drop = l1_li.find("div", class_="j-dropdown", recursive=False)
+            if not l1_drop:
+                continue
+            l2_ul = l1_drop.find("ul", class_="j-menu")
+            if not l2_ul:
+                continue
+
+            for l2_li in l2_ul.find_all("li", class_="menu-item", recursive=False):
+                l2_a = l2_li.find("a", recursive=False)
+                if not l2_a:
                     continue
-                # Each direct li child is an L2 category — we save it regardless
-                # of whether it has its own L3 sub-menu (we don't go deeper)
-                for sub_li in inner_ul.find_all("li", recursive=False):
-                    a = sub_li.find("a", recursive=False)
-                    if not a:
+                l2_href: str = l2_a.get("href", "")
+                l2_span = l2_a.find("span", class_="links-text")
+                l2_name: str = l2_span.get_text(strip=True) if l2_span else l2_a.get_text(strip=True)
+                if not l2_href.startswith(site.url) or not l2_name:
+                    continue
+
+                l2_slug = f"{l1_slug}-{slugify(l2_name)}"
+                print("\t", slugify(l2_name))
+                categories.append({"name": l2_name, "url": l2_href, "parent_url": l1_href, "slug": l2_slug})
+
+                l2_drop = l2_li.find("div", class_="j-dropdown", recursive=False)
+                if not l2_drop:
+                    continue
+                l3_ul = l2_drop.find("ul", class_="j-menu")
+                if not l3_ul:
+                    continue
+
+                for l3_li in l3_ul.find_all("li", class_="menu-item", recursive=False):
+                    l3_a = l3_li.find("a", recursive=False)
+                    if not l3_a:
                         continue
-                    href: str = a.get("href", "")
-                    name_span = a.find("span", class_="links-text")
-                    name: str = name_span.get_text(strip=True) if name_span else a.get_text(strip=True)
-                    if href.startswith(site.url) and name:
-                        categories.append({"name": name, "url": href})
-            else:
-                # No L2 submenu — save this L1 item directly (e.g. Gaming Console)
-                a = flyout_li.find("a", recursive=False)
-                if not a:
-                    continue
-                href = a.get("href", "")
-                name_span = a.find("span", class_="links-text")
-                name = name_span.get_text(strip=True) if name_span else a.get_text(strip=True)
-                if href and href != "#" and href.startswith(site.url) and name:
-                    categories.append({"name": name, "url": href})
+                    l3_href: str = l3_a.get("href", "")
+                    l3_span = l3_a.find("span", class_="links-text")
+                    l3_name: str = l3_span.get_text(strip=True) if l3_span else l3_a.get_text(strip=True)
+                    if not l3_href.startswith(site.url) or not l3_name:
+                        continue
+
+                    l3_slug = f"{l2_slug}-{slugify(l3_name)}"
+                    print("\t\t", slugify(l3_name))
+                    categories.append({"name": l3_name, "url": l3_href, "parent_url": l2_href, "slug": l3_slug})
+
+                    l3_drop = l3_li.find("div", class_="j-dropdown", recursive=False)
+                    if not l3_drop:
+                        continue
+                    l4_ul = l3_drop.find("ul", class_="j-menu")
+                    if not l4_ul:
+                        continue
+
+                    for l4_li in l4_ul.find_all("li", class_="menu-item", recursive=False):
+                        l4_a = l4_li.find("a", recursive=False)
+                        if not l4_a:
+                            continue
+                        l4_href: str = l4_a.get("href", "")
+                        l4_span = l4_a.find("span", class_="links-text")
+                        l4_name: str = l4_span.get_text(strip=True) if l4_span else l4_a.get_text(strip=True)
+                        if not l4_href.startswith(site.url) or not l4_name:
+                            continue
+
+                        l4_slug = f"{l3_slug}-{slugify(l4_name)}"
+                        print("\t\t\t", slugify(l4_name))
+                        categories.append({"name": l4_name, "url": l4_href, "parent_url": l3_href, "slug": l4_slug})
 
         if not categories:
             self.stderr.write("No categories found — check the HTML structure.")
             return
 
         self.stdout.write(f"Found {len(categories)} categories. Saving...")
-
         created, updated = save_categories("UCC BD", categories)
         self.stdout.write(self.style.SUCCESS(f"Done — {created} created, {updated} updated."))

@@ -61,18 +61,17 @@
                 </select>
             </div>
             <div class="filter-group">
-                <span class="filter-label">Availability:</span>
-                <select class="filter-select" id="availabilityFilter" onchange="sortAndDisplayResults()">
-                    <option value="all">All Products</option>
-                    <option value="available">Available Only (Price > 0)</option>
-                </select>
-            </div>
-            <div class="filter-group">
-                <span class="filter-label">Sort by:</span>
-                <select class="filter-select" id="sortSelect" onchange="sortAndDisplayResults()">
-                    <option value="price-low">Price: Low to High</option>
-                    <option value="price-high">Price: High to Low</option>
-                    <option value="store">Store Name</option>
+                <span class="filter-label">Sort / Filter:</span>
+                <select class="filter-select" id="sortFilter" onchange="onSortFilterChange(this)">
+                    <optgroup label="Sort By">
+                        <option value="sort:price-low">Price: Low to High</option>
+                        <option value="sort:price-high">Price: High to Low</option>
+                        <option value="sort:store">Store Name</option>
+                    </optgroup>
+                    <optgroup label="Availability">
+                        <option value="avail:all">All Products</option>
+                        <option value="avail:available">Available Only (Price &gt; 0)</option>
+                    </optgroup>
                 </select>
             </div>
         </div>

@@ -1,6 +1,8 @@
 // Global state
 let allProducts = [];
 let filteredProducts = [];
+let currentSort = 'price-low';
+let currentAvailability = 'all';
 
 // Convert a site name to a CSS-safe slug (e.g. "Star Tech" → "star-tech")
 function slugify(name) {
@@ -79,8 +81,10 @@ function displayResults(data) {
 
     populateStoreFilter();
 
+    currentSort = 'price-low';
+    currentAvailability = 'all';
     document.getElementById('storeFilter').value = 'all';
-    document.getElementById('sortSelect').value = 'price-low';
+    document.getElementById('sortFilter').value = 'sort:price-low';
 
     updateSummary();
     sortAndDisplayResults();
@@ -109,9 +113,19 @@ function populateStoreFilter() {
     });
 }
 
+// Called when the combined Sort / Filter dropdown changes
+function onSortFilterChange(select) {
+    const [prefix, value] = select.value.split(':');
+    if (prefix === 'sort') {
+        currentSort = value;
+    } else if (prefix === 'avail') {
+        currentAvailability = value;
+    }
+    sortAndDisplayResults();
+}
+
 // Sort and display results
 function sortAndDisplayResults() {
-    const sortValue = document.getElementById('sortSelect').value;
     const storeFilter = document.getElementById('storeFilter').value;
 
     filteredProducts = [...allProducts];
@@ -120,16 +134,15 @@ function sortAndDisplayResults() {
         filteredProducts = filteredProducts.filter(p => p.store === storeFilter);
     }
 
-    const availabilityFilter = document.getElementById('availabilityFilter');
-    if (availabilityFilter && availabilityFilter.value === 'available') {
+    if (currentAvailability === 'available') {
         filteredProducts = filteredProducts.filter(p => p.priceValue > 0);
     }
 
-    if (sortValue === 'price-low') {
+    if (currentSort === 'price-low') {
         filteredProducts.sort((a, b) => a.priceValue - b.priceValue);
-    } else if (sortValue === 'price-high') {
+    } else if (currentSort === 'price-high') {
         filteredProducts.sort((a, b) => b.priceValue - a.priceValue);
-    } else if (sortValue === 'store') {
+    } else if (currentSort === 'store') {
         filteredProducts.sort((a, b) => a.storeName.localeCompare(b.storeName));
     }
 

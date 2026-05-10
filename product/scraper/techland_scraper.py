@@ -19,7 +19,7 @@ class TechlandScraper(BasePaginatedScraper):
         self._session: aiohttp.ClientSession | None = None
 
     def all_categories(self):
-        return list(Category.objects.filter(site__name=self.name).select_related("site"))
+        return list(Category.objects.filter(site__name=self.name, subcategories__isnull=True).select_related("site"))
 
     async def create_fetcher(self) -> HttpClientFetcher:
         self._session = aiohttp.ClientSession()
@@ -86,7 +86,7 @@ class TechlandScraper(BasePaginatedScraper):
                         continue
 
                     # Current price: first span containing ৳ without line-through
-                    price = ""
+                    price = 0
                     content_section = card.find("div", class_="product-content-section")
                     if content_section:
                         for span in content_section.find_all("span"):

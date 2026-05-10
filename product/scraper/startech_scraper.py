@@ -18,9 +18,10 @@ class StartechScraper(BasePaginatedScraper):
     def __init__(self):
         super().__init__(name="Star Tech", logger=logger, max_retries=3, retry_delay=2)
         self._session: aiohttp.ClientSession | None = None
+        self._price_enum = ["Pre Order", "Out Of Stock", "Up Coming"]
 
     def all_categories(self):
-        return list(Category.objects.filter(site__name=self.name).select_related("site"))
+        return list(Category.objects.filter(site__name=self.name, subcategories__isnull=True).select_related("site"))
         # return list(Category.objects.filter(url="https://www.startech.com.bd/component/processor").select_related("site"))
 
     async def create_fetcher(self) -> HttpClientFetcher:
@@ -90,9 +91,12 @@ class StartechScraper(BasePaginatedScraper):
                         if price_new_span:
                             price_text = price_new_span.get_text(strip=True)
                         else:
-                            price_old_span = price_tag.find("span", class_="price-old")
-                            price_text = price_old_span.get_text(strip=True) if price_old_span else ""
-                        price = "".join(ch for ch in price_text if ch.isdigit())
+                            price_text = price_tag.get_text(strip=True) if price_tag else ""
+
+                        if price_text in self._price_enum:
+                            price = 0
+                        else:
+                            price = "".join(ch for ch in price_text if ch.isdigit())
 
                     description = ""
                     desc_div = card.find("div", class_="short-description")

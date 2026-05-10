@@ -143,7 +143,7 @@ class BasePaginatedScraper(ABC):
         today = timezone.now().date()
 
         # Filter out products missing required fields
-        valid = [d for d in products if d.get("url") and d.get("price") and d.get("name")]
+        valid = [d for d in products if d.get("url") and d.get("price") is not '' and d.get("name")]
         if not valid:
             self.logger.warning("No valid products to save for category: %s", category.name)
             return
@@ -219,6 +219,12 @@ class BasePaginatedScraper(ABC):
                             "Failed to create product %s | category %s | error: %s",
                             product.url, category.url, exc,
                         )
+
+        if len(products) != len(to_create) + len(to_update):
+            self.logger.warning(
+                "Mismatch in product counts for category %s: total=%s, created=%s, updated=%s",
+                category.url, len(products), len(to_create), len(to_update)
+            )
 
         # --- 3. Re-fetch all products to get PKs (needed after bulk_create) ---
         product_map: dict[str, Any] = {

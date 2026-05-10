@@ -19,7 +19,7 @@ class UccBdScraper(BasePaginatedScraper):
         self._session: aiohttp.ClientSession | None = None
 
     def all_categories(self):
-        return list(Category.objects.filter(site__name=self.name).select_related("site"))
+        return list(Category.objects.filter(site__name=self.name, subcategories__isnull=True).select_related("site"))
 
     async def create_fetcher(self) -> HttpClientFetcher:
         self._session = aiohttp.ClientSession()

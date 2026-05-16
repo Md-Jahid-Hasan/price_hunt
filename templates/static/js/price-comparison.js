@@ -3,6 +3,8 @@ let allProducts = [];
 let filteredProducts = [];
 let currentSort = 'price-low';
 let currentAvailability = 'all';
+let currentPage = 1;
+const ITEMS_PER_PAGE = 12;
 
 // Convert a site name to a CSS-safe slug (e.g. "Star Tech" → "star-tech")
 function slugify(name) {
@@ -146,23 +148,60 @@ function sortAndDisplayResults() {
         filteredProducts.sort((a, b) => a.storeName.localeCompare(b.storeName));
     }
 
+    currentPage = 1;
     updateShowingCount(filteredProducts.length, storeFilter);
-    displayProducts(filteredProducts);
-}
 
-// Display products
-function displayProducts(products) {
     const grid = document.getElementById('productsGrid');
     grid.innerHTML = '';
+    document.getElementById('pagination').innerHTML = '';
 
-    if (products.length === 0) {
+    if (filteredProducts.length === 0) {
         grid.innerHTML = '<div class="empty-state"><h3>No products found</h3><p>Try adjusting your filters</p></div>';
         return;
     }
 
-    products.forEach(product => {
-        grid.appendChild(createProductCard(product));
-    });
+    renderPage();
+}
+
+// Append current page of products to the grid
+function renderPage() {
+    const total = filteredProducts.length;
+    const start = (currentPage - 1) * ITEMS_PER_PAGE;
+    const end = Math.min(start + ITEMS_PER_PAGE, total);
+    const grid = document.getElementById('productsGrid');
+
+    filteredProducts.slice(start, end).forEach(p => grid.appendChild(createProductCard(p)));
+
+    renderLoadMoreBtn(end < total, end, total);
+}
+
+// Load the next batch of products
+function loadMore() {
+    currentPage++;
+    renderPage();
+}
+
+// Render the load-more button (or a completion note when all products are shown)
+function renderLoadMoreBtn(hasMore, loaded, total) {
+    const container = document.getElementById('pagination');
+    container.innerHTML = '';
+
+    if (!hasMore) {
+        if (total > ITEMS_PER_PAGE) {
+            const msg = document.createElement('p');
+            msg.className = 'all-loaded-msg';
+            msg.textContent = `All ${total} products loaded`;
+            container.appendChild(msg);
+        }
+        return;
+    }
+
+    const remaining = Math.min(total - loaded, ITEMS_PER_PAGE);
+    const btn = document.createElement('button');
+    btn.className = 'load-more-btn';
+    btn.innerHTML = `&#43; Load ${remaining} More <span class="load-more-badge">${loaded} / ${total}</span>`;
+    btn.addEventListener('click', loadMore);
+    container.appendChild(btn);
 }
 
 // Create product card

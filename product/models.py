@@ -15,6 +15,7 @@ class Category(models.Model):
     slug = models.SlugField(max_length=255)
     url = models.URLField(unique=True)
     is_active = models.BooleanField(default=True)
+    keywords = models.TextField(blank=True, default='')
 
     def __str__(self):
         return self.name

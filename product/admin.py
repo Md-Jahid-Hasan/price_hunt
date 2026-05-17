@@ -44,7 +44,7 @@ class CategoryAdmin(admin.ModelAdmin):
             'fields': ('name', 'slug', 'site', 'parent')
         }),
         ('URL', {
-            'fields': ('url',)
+            'fields': ('url', 'keywords')
         }),
         ('Status', {
             'fields': ('is_active',)
@@ -132,7 +132,7 @@ class ProductAdmin(admin.ModelAdmin):
 
 @admin.register(PriceHistory)
 class PriceHistoryAdmin(admin.ModelAdmin):
-    list_display = ('product', 'price', 'recorded_at')
+    list_display = ('product_id', 'price', 'recorded_at')
     list_filter = ('recorded_at', 'product__site')
     search_fields = ('product__name',)
     readonly_fields = ('product', 'price', 'recorded_at')

@@ -1,4 +1,6 @@
 import re
+from datetime import timedelta
+from django.utils import timezone
 
 from django.db.models import Q
 from django.utils.text import slugify
@@ -6,8 +8,15 @@ from django.shortcuts import render
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.status import HTTP_200_OK, HTTP_400_BAD_REQUEST
+from rest_framework import status
 
 from product.models import Product, Category
+from product.models import PriceHistory
+from product.serializers import PricePointSerializer
+
+
+MAX_PRODUCT_IDS = 50
+HISTORY_DAYS = 62  # ~2 months
 
 
 def home_page(request):
@@ -24,8 +33,8 @@ class ProductComparisonView(APIView):
         # Fetch related categories for the product query
 
         escaped = [re.escape(w) for w in product_query]
-        pattern = r'(^|[-_])(?:' + '|'.join(escaped) + r')(?:$|[-_])'
-        qs = Category.objects.filter(slug__iregex=pattern)
+        pattern = r'(^|[-_ ])(?:' + '|'.join(escaped) + r')(?:$|[-_ ])'
+        qs = Category.objects.filter(Q(slug__iregex=pattern) | Q(keywords__iregex=pattern))
         return qs
 
     def build_product_query(self, query_words: list[str]) -> Q:
@@ -36,7 +45,7 @@ class ProductComparisonView(APIView):
         q = Q()
         for word in query_words:
             # Each word must appear in the product name (case-insensitive)
-            q &= Q(name__icontains=word)
+            q &= Q(slug__icontains=word)
         return q
 
     def get(self, request):
@@ -62,6 +71,7 @@ class ProductComparisonView(APIView):
         for product in products:
             site_name = product.site.name if product.site else "Unknown"
             results.setdefault(site_name, []).append({
+                "id": product.id,
                 "name": product.name,
                 "url": product.url,
                 "price": str(product.price),
@@ -70,6 +80,76 @@ class ProductComparisonView(APIView):
             })
 
         return Response(results, status=HTTP_200_OK)
+
+
+class PriceHistoryView(APIView):
+    """
+    Returns the last 2-month price history for one or more products.
+
+    GET /api/products/price-history/?ids=1,2,3
+
+    - ids: comma-separated list of product IDs (max 50)
+
+    Response shape:
+    {
+        "<product_id>": [
+            {"price": "1500.00", "recorded_at": "2026-03-10T08:00:00Z"},
+            ...
+        ],
+        ...
+    }
+    Products with no history in the window are included as empty lists.
+    """
+
+    def _parse_ids(self, raw: str) -> list[int] | None:
+        """Returns deduplicated list of ints, or None on parse error."""
+        try:
+            ids = [int(x) for x in raw.split(",") if x.strip()]
+        except ValueError:
+            return None
+        # Deduplicate while preserving order
+        return list(dict.fromkeys(ids))
+
+    def get(self, request):
+        raw_ids = request.query_params.get("ids", "").strip()
+        if not raw_ids:
+            return Response(
+                {"error": "Query parameter 'ids' is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        product_ids = self._parse_ids(raw_ids)
+        if product_ids is None:
+            return Response(
+                {"error": "All product IDs must be positive integers."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        cutoff = timezone.now() - timedelta(days=HISTORY_DAYS)
+
+        # Single query — the composite index (product_id, recorded_at DESC) makes this
+        # efficient even on a very large table: index range scan per product, no seq scan.
+        rows = (
+            PriceHistory.objects.filter(
+                product_id__in=product_ids,
+                recorded_at__gte=cutoff,
+            )
+            .values("product_id", "price", "recorded_at")
+            .order_by("product_id", "-recorded_at")
+        )
+
+        # Pre-populate all requested IDs so missing products appear as empty lists
+        result: dict[str, list] = {str(pid): [] for pid in product_ids}
+
+        for row in rows:
+            key = str(row["product_id"])
+            result[key].append(
+                PricePointSerializer(
+                    {"price": row["price"], "recorded_at": row["recorded_at"]}
+                ).data
+            )
+
+        return Response(result, status=status.HTTP_200_OK)
 
 
 # uvicorn price_comparison.asgi:application --host 0.0.0.0 --port 8000

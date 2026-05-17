@@ -14,7 +14,7 @@ function slugify(name) {
 // Format a raw decimal price string as "৳ 75,000"
 function formatPrice(priceStr) {
     const num = parseFloat(priceStr);
-    if (!num) return 'Price N/A';
+    if (!num) return 'Not Available';
     return '৳ ' + Math.round(num).toLocaleString();
 }
 
@@ -163,16 +163,19 @@ function sortAndDisplayResults() {
     renderPage();
 }
 
-// Append current page of products to the grid
+// Append current page of products to the grid, then fetch price history for the batch
 function renderPage() {
     const total = filteredProducts.length;
     const start = (currentPage - 1) * ITEMS_PER_PAGE;
     const end = Math.min(start + ITEMS_PER_PAGE, total);
+    const batch = filteredProducts.slice(start, end);
     const grid = document.getElementById('productsGrid');
 
-    filteredProducts.slice(start, end).forEach(p => grid.appendChild(createProductCard(p)));
-
+    batch.forEach(p => grid.appendChild(createProductCard(p)));
     renderLoadMoreBtn(end < total, end, total);
+
+    const ids = batch.map(p => p.id).filter(Boolean);
+    if (ids.length) fetchPriceHistory(ids);
 }
 
 // Load the next batch of products
@@ -204,10 +207,81 @@ function renderLoadMoreBtn(hasMore, loaded, total) {
     container.appendChild(btn);
 }
 
+// Fetch price history for a batch of product IDs and paint cards
+async function fetchPriceHistory(ids) {
+    try {
+        const res = await fetch(`/api/pice-history/?ids=${ids.join(',')}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        Object.entries(data).forEach(([productId, points]) => {
+            paintHistory(productId, points);
+        });
+    } catch (e) {
+        console.error('Price history error:', e);
+    }
+}
+
+// Replace the skeleton in a card with real history data
+function paintHistory(productId, points) {
+    const card = document.querySelector(`[data-product-id="${productId}"]`);
+    if (!card) return;
+    const panel = card.querySelector('.price-history');
+    if (!panel) return;
+
+    if (!points || points.length === 0) {
+        panel.innerHTML = '<p class="history-empty">No price history available</p>';
+        return;
+    }
+
+    const sorted = [...points].sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
+    const prices = sorted.map(p => parseFloat(p.price));
+    const first = prices[0];
+    const last = prices[prices.length - 1];
+    const pct = ((last - first) / first * 100).toFixed(1);
+    const isDown = last < first;
+    const isFlat = last === first;
+    const trendClass = isFlat ? 'trend-stable' : isDown ? 'trend-down' : 'trend-up';
+    const trendText = isFlat ? '→ Stable' : `${isDown ? '↓' : '↑'} ${Math.abs(pct)}%`;
+
+    panel.innerHTML = `
+        <div class="history-header">
+            <span class="history-label">2-month trend</span>
+            <span class="price-trend ${trendClass}">${trendText}</span>
+        </div>
+        ${buildSparkline(prices, isDown, isFlat)}
+    `;
+}
+
+// Build an SVG area sparkline from an array of prices
+function buildSparkline(prices, isDown, isFlat) {
+    const W = 200, H = 40;
+    const min = Math.min(...prices);
+    const max = Math.max(...prices);
+    const range = max - min || 1;
+    const pad = 4;
+
+    const pts = prices.map((p, i) => ({
+        x: (i / Math.max(prices.length - 1, 1)) * W,
+        y: H - pad - ((p - min) / range) * (H - pad * 2),
+    }));
+
+    const linePts = pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+    const areaPath = `M${pts[0].x},${H} ${pts.map(p => `L${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')} L${pts[pts.length - 1].x},${H} Z`;
+
+    const stroke = isFlat ? '#94a3b8' : isDown ? '#10b981' : '#ef4444';
+    const fill   = isFlat ? 'rgba(148,163,184,0.1)' : isDown ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.1)';
+
+    return `<svg class="sparkline" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+        <path d="${areaPath}" fill="${fill}"/>
+        <polyline points="${linePts}" fill="none" stroke="${stroke}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    </svg>`;
+}
+
 // Create product card
 function createProductCard(product) {
     const card = document.createElement('div');
     card.className = 'product-card';
+    if (product.id) card.dataset.productId = product.id;
 
     // Meta row: store badge + category tag
     const metaRow = document.createElement('div');
@@ -233,6 +307,14 @@ function createProductCard(product) {
     productPrice.className = 'product-price';
     productPrice.textContent = formatPrice(product.price);
 
+    const historyPanel = document.createElement('div');
+    historyPanel.className = 'price-history';
+    if (product.id) {
+        historyPanel.innerHTML = '<div class="history-skeleton"></div>';
+    } else {
+        historyPanel.innerHTML = '<p class="history-empty">No price history available</p>';
+    }
+
     const actionsDiv = document.createElement('div');
     actionsDiv.className = 'product-actions';
 
@@ -244,35 +326,10 @@ function createProductCard(product) {
 
     actionsDiv.appendChild(viewBtn);
 
-    const toggleBtn = document.createElement('button');
-    toggleBtn.className = 'specs-toggle-btn';
-    toggleBtn.innerHTML = 'Specifications <span class="specs-chevron">&#9660;</span>';
-
-    const specsDiv = document.createElement('div');
-    specsDiv.className = 'product-specs';
-
-    const specsContent = document.createElement('div');
-    specsContent.className = 'specs-content';
-
-    const descriptionHtml = product.description_html || product.description;
-    if (descriptionHtml) {
-        specsContent.innerHTML = descriptionHtml;
-    } else {
-        specsContent.innerHTML = '<p class="specs-empty">No specifications available</p>';
-    }
-
-    specsDiv.appendChild(specsContent);
-
-    toggleBtn.addEventListener('click', () => {
-        const isOpen = specsDiv.classList.toggle('open');
-        toggleBtn.classList.toggle('open', isOpen);
-    });
-
     card.appendChild(metaRow);
     card.appendChild(productName);
     card.appendChild(productPrice);
-    card.appendChild(toggleBtn);
-    card.appendChild(specsDiv);
+    card.appendChild(historyPanel);
     card.appendChild(actionsDiv);
 
     return card;

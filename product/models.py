@@ -13,7 +13,7 @@ class Category(models.Model):
     parent = models.ForeignKey('self', on_delete=models.SET_NULL, related_name='subcategories', null=True, blank=True)
     name = models.CharField(max_length=100)
     slug = models.SlugField(max_length=255)
-    url = models.URLField(unique=True)
+    url = models.URLField(unique=True, null=True, blank=True)
     is_active = models.BooleanField(default=True)
     keywords = models.TextField(blank=True, default='')
 
@@ -30,18 +30,15 @@ class Category(models.Model):
         Recursively sets is_active=False on all descendant categories.
         Returns the total number of categories updated.
         """
-        # Collect all descendant IDs via BFS to avoid deep recursion
-        ids_to_deactivate = []
-        queue = list(self.subcategories.values_list('id', flat=True))
-        while queue:
-            ids_to_deactivate.extend(queue)
-            queue = list(
-                Category.objects.filter(parent_id__in=queue)
-                .values_list('id', flat=True)
-            )
-        if not ids_to_deactivate:
-            return 0
-        return Category.objects.filter(id__in=ids_to_deactivate).update(is_active=False)
+        sub_categories = self.subcategories.all()
+        for cat in sub_categories:
+            if cat.subcategories.exists():
+                cat.deactivate_children()
+
+        sub_categories.update(is_active=False)
+        self.is_active = False
+        self.save()
+        print(f"Deactivated {sub_categories.count()} subcategories of '{self.name}'")
 
 
 class Product(models.Model):

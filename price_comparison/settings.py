@@ -29,7 +29,7 @@ SECRET_KEY = 'django-insecure-v*5tt3zm&3f0ky3&0saitr_bbo2%u&&20*5ietw=trxajmoufw
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",")
 
 # Application definition
 
@@ -82,8 +82,8 @@ TEMPLATES = [
     },
 ]
 
-# WSGI_APPLICATION = 'price_comparison.wsgi.application'
-ASGI_APPLICATION = 'price_comparison.asgi.application'
+WSGI_APPLICATION = 'price_comparison.wsgi.application'
+# ASGI_APPLICATION = 'price_comparison.asgi.application'
 
 # Cache (django-redis) — reuses the existing Redis instance already running for Celery
 CACHES = {

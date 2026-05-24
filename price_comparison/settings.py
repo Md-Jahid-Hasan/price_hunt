@@ -85,6 +85,19 @@ TEMPLATES = [
 # WSGI_APPLICATION = 'price_comparison.wsgi.application'
 ASGI_APPLICATION = 'price_comparison.asgi.application'
 
+# Cache (django-redis) — reuses the existing Redis instance already running for Celery
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0"),
+        "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"},
+        "KEY_PREFIX": "pc",
+    }
+}
+
+# Comparison token TTL in seconds (~5 min)
+COMPARISON_TOKEN_TTL = 300
+
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 

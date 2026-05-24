@@ -37,7 +37,10 @@ def save_categories(site_name: str, categories: list[dict]) -> tuple[int, int]:
 
     for data in categories:
         slug = data.get("slug") or slugify(data["name"])
-        parent = url_to_cat.get(data["parent_url"]) if data.get("parent_url") else None
+        if data.get("parent_url"):
+            parent = url_to_cat.get(data["parent_url"])
+        else:
+            parent = Category.objects.filter(site=site, slug=data.get("parent_slug")).first()
 
         if data["url"] in url_to_cat:
             cat = url_to_cat[data["url"]]
@@ -54,7 +57,8 @@ def save_categories(site_name: str, categories: list[dict]) -> tuple[int, int]:
                 site=site,
                 parent=parent,
             )
-            url_to_cat[data["url"]] = cat
+            if data['url']:
+                url_to_cat[data["url"]] = cat
             created += 1
 
     if to_update:

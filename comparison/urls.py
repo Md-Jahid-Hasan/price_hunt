@@ -4,5 +4,5 @@ from django.urls import path
 urlpatterns = [
     path('', home_page, name='home'),
     path('api/product-comparison/', ProductComparisonView.as_view(), name='product_comparison'),
-    path('api/pice-history/', PriceHistoryView.as_view(), name='price_history'),
+    path('api/products/price-history/', PriceHistoryView.as_view(), name='price_history'),
 ]

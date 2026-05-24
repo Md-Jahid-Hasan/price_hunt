@@ -6,6 +6,9 @@ let currentAvailability = 'all';
 let currentPage = 1;
 const ITEMS_PER_PAGE = 12;
 
+let historyToken = null;            // single-use token issued by the comparison API
+let priceHistoryCache = {};         // { "<productId>": [points] } — populated once per search
+
 // Convert a site name to a CSS-safe slug (e.g. "Star Tech" → "star-tech")
 function slugify(name) {
     return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -60,10 +63,13 @@ function displayResults(data) {
         return;
     }
 
+    // API now returns { results: { site: [...] }, history_token: "..." }
+    const siteResults = data.results || {};
+    historyToken = data.history_token || null;
+    priceHistoryCache = {};
     allProducts = [];
 
-    // Iterate over every site key returned by the API dynamically
-    Object.entries(data).forEach(([siteName, products]) => {
+    Object.entries(siteResults).forEach(([siteName, products]) => {
         if (!Array.isArray(products) || products.length === 0) return;
         const storeSlug = slugify(siteName);
         products.forEach(p => {
@@ -79,6 +85,13 @@ function displayResults(data) {
     if (allProducts.length === 0) {
         document.getElementById('emptyState').style.display = 'block';
         return;
+    }
+
+    // Fetch price history for ALL products in one request using the single-use token.
+    // Results are cached so subsequent pages (Load More) paint instantly without a new request.
+    if (historyToken) {
+        const allIds = allProducts.map(p => p.id).filter(Boolean);
+        if (allIds.length) fetchAllPriceHistory(allIds, historyToken);
     }
 
     populateStoreFilter();
@@ -148,6 +161,9 @@ function sortAndDisplayResults() {
         filteredProducts.sort((a, b) => a.storeName.localeCompare(b.storeName));
     }
 
+    // Push unavailable products (price = 0) to the bottom regardless of sort mode
+    filteredProducts.sort((a, b) => (a.priceValue === 0 ? 1 : 0) - (b.priceValue === 0 ? 1 : 0));
+
     currentPage = 1;
     updateShowingCount(filteredProducts.length, storeFilter);
 
@@ -163,7 +179,7 @@ function sortAndDisplayResults() {
     renderPage();
 }
 
-// Append current page of products to the grid, then fetch price history for the batch
+// Append current page of products to the grid, then paint history from cache
 function renderPage() {
     const total = filteredProducts.length;
     const start = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -174,8 +190,12 @@ function renderPage() {
     batch.forEach(p => grid.appendChild(createProductCard(p)));
     renderLoadMoreBtn(end < total, end, total);
 
-    const ids = batch.map(p => p.id).filter(Boolean);
-    if (ids.length) fetchPriceHistory(ids);
+    // Paint from cache if history already arrived; if the fetch is still in-flight,
+    // paintCachedHistory() will cover these cards when it resolves.
+    batch.forEach(p => {
+        const key = String(p.id);
+        if (key in priceHistoryCache) paintHistory(key, priceHistoryCache[key]);
+    });
 }
 
 // Load the next batch of products
@@ -207,18 +227,27 @@ function renderLoadMoreBtn(hasMore, loaded, total) {
     container.appendChild(btn);
 }
 
-// Fetch price history for a batch of product IDs and paint cards
-async function fetchPriceHistory(ids) {
+// Fetch price history for ALL products at once using the single-use token.
+// Populates priceHistoryCache, then paints any cards already in the DOM.
+async function fetchAllPriceHistory(ids, token) {
     try {
-        const res = await fetch(`/api/pice-history/?ids=${ids.join(',')}`);
+        const res = await fetch(
+            `/api/products/price-history/?ids=${ids.join(',')}&history_token=${encodeURIComponent(token)}`
+        );
         if (!res.ok) return;
         const data = await res.json();
-        Object.entries(data).forEach(([productId, points]) => {
-            paintHistory(productId, points);
-        });
+        Object.assign(priceHistoryCache, data);
+        paintCachedHistory();
     } catch (e) {
         console.error('Price history error:', e);
     }
+}
+
+// Paint history for every card currently in the DOM using the cache.
+function paintCachedHistory() {
+    Object.entries(priceHistoryCache).forEach(([productId, points]) => {
+        paintHistory(productId, points);
+    });
 }
 
 // Replace the skeleton in a card with real history data
@@ -234,7 +263,14 @@ function paintHistory(productId, points) {
     }
 
     const sorted = [...points].sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
-    const prices = sorted.map(p => parseFloat(p.price));
+    const available = sorted.filter(p => parseFloat(p.price) > 0);
+
+    if (available.length === 0) {
+        panel.innerHTML = '<p class="history-empty">Currently Unavailable</p>';
+        return;
+    }
+
+    const prices = available.map(p => parseFloat(p.price));
     const first = prices[0];
     const last = prices[prices.length - 1];
     const pct = ((last - first) / first * 100).toFixed(1);

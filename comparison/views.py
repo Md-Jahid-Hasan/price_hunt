@@ -13,6 +13,8 @@ from rest_framework import status
 from product.models import Product, Category
 from product.models import PriceHistory
 from product.serializers import PricePointSerializer
+from comparison.tokens import generate_comparison_token
+from comparison.permissions import ComparisonTokenPermission
 
 
 MAX_PRODUCT_IDS = 50
@@ -79,14 +81,21 @@ class ProductComparisonView(APIView):
                 "category": product.category.name if product.category else "",
             })
 
-        return Response(results, status=HTTP_200_OK)
+        all_ids = [p["id"] for site_products in results.values() for p in site_products]
+        history_token = generate_comparison_token(all_ids) if all_ids else None
+
+        return Response(
+            {"results": results, "history_token": history_token},
+            status=HTTP_200_OK,
+        )
 
 
 class PriceHistoryView(APIView):
     """
     Returns the last 2-month price history for one or more products.
+    Requires a valid `history_token` issued by ProductComparisonView.
 
-    GET /api/products/price-history/?ids=1,2,3
+    GET /api/products/price-history/?ids=1,2,3&history_token=<token>
 
     - ids: comma-separated list of product IDs (max 50)
 
@@ -100,6 +109,8 @@ class PriceHistoryView(APIView):
     }
     Products with no history in the window are included as empty lists.
     """
+
+    permission_classes = [ComparisonTokenPermission]
 
     def _parse_ids(self, raw: str) -> list[int] | None:
         """Returns deduplicated list of ints, or None on parse error."""

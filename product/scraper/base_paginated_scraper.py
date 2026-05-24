@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import random
 from abc import ABC, abstractmethod
 from typing import Any, Protocol
 
@@ -25,6 +26,9 @@ class BasePaginatedScraper(ABC):
         retry_delay: int = 2,
         max_concurrent_categories: int = 20,
         batch_pause: int = 5,
+        inter_page_delay: tuple[float, float] | None = None,
+        inter_category_delay: tuple[float, float] | None = None,
+        fetcher_restart_interval: int | None = None,
     ):
         self.name = name
         self.logger = logger
@@ -32,6 +36,9 @@ class BasePaginatedScraper(ABC):
         self.retry_delay = retry_delay
         self.max_concurrent_categories = max_concurrent_categories
         self.batch_pause = batch_pause
+        self.inter_page_delay = inter_page_delay
+        self.inter_category_delay = inter_category_delay
+        self.fetcher_restart_interval = fetcher_restart_interval
 
     # ------------------------------------------------------------------
     # Hooks for subclasses
@@ -115,25 +122,25 @@ class BasePaginatedScraper(ABC):
         self.logger.info("Page %s: extracted %s products", page, len(products))
         return products
 
-    async def extract_data(self, url: str, fetcher: FetcherProtocol,  all_products: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
-        if not all_products:
-            all_products: list[dict[str, Any]] = []
-        self.logger.info("Fetching first page: %s", url)
-
-        content = await self._fetch_with_retry(url, fetcher)
-        if not content:
-            self.logger.warning("Could not fetch first page for %s", url)
-            return all_products
-
-        soup = BeautifulSoup(content, "html.parser")
-
-        page_products = self.parse_products(soup)
-        all_products.extend(page_products)
-        self.logger.info("Page %s: extracted %s products", url, len(page_products))
-
-        next_page_link = self.get_next_page_url(soup)
-        if next_page_link:
-            await self.extract_data(next_page_link, fetcher, all_products)
+    async def extract_data(self, url: str, fetcher: FetcherProtocol, all_products: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+        all_products = all_products or []
+        current_url: str | None = url
+        while current_url:
+            self.logger.info("Fetching page: %s", current_url)
+            content = await self._fetch_with_retry(current_url, fetcher)
+            if not content:
+                self.logger.warning("Could not fetch page %s; stopping pagination", current_url)
+                break
+            soup = BeautifulSoup(content, "html.parser")
+            page_products = self.parse_products(soup)
+            all_products.extend(page_products)
+            self.logger.info("Page %s: extracted %s products", current_url, len(page_products))
+            next_page_link = self.get_next_page_url(soup)
+            # if next_page_link and self.inter_page_delay:
+            #     delay = random.uniform(*self.inter_page_delay)
+            #     self.logger.info("Waiting %.1fs before next page...", delay)
+            #     await asyncio.sleep(delay)
+            current_url = next_page_link
         return all_products
 
     def _save_products(self, products: list[dict[str, Any]], category: Any) -> None:
@@ -143,7 +150,7 @@ class BasePaginatedScraper(ABC):
         today = timezone.now().date()
 
         # Filter out products missing required fields
-        valid = [d for d in products if d.get("url") and d.get("price") is not '' and d.get("name")]
+        valid = [d for d in products if d.get("url") and d.get("price") != '' and d.get("name")]
         if not valid:
             self.logger.warning("No valid products to save for category: %s", category.name)
             return
@@ -311,8 +318,22 @@ class BasePaginatedScraper(ABC):
 
                 is_last_batch = batch_start + batch_size >= total
                 if not is_last_batch:
-                    self.logger.info("Batch %s done. Pausing %ss...", batch_num, self.batch_pause)
-                    await asyncio.sleep(self.batch_pause)
+                    completed = batch_start + len(batch)
+
+                    if self.fetcher_restart_interval and completed % self.fetcher_restart_interval == 0:
+                        self.logger.info(
+                            "Restarting fetcher after %s categories to clear memory...", completed
+                        )
+                        await self.close_fetcher(fetcher)
+                        fetcher = await self.create_fetcher()
+
+                    if self.inter_category_delay:
+                        delay = random.uniform(*self.inter_category_delay)
+                        self.logger.info("Waiting %.0fs before next category...", delay)
+                        await asyncio.sleep(delay)
+                    else:
+                        self.logger.info("Batch %s done. Pausing %ss...", batch_num, self.batch_pause)
+                        await asyncio.sleep(self.batch_pause)
 
             normalized: list[list[dict[str, Any]]] = []
             for category, result in all_results:

@@ -2,7 +2,9 @@ import asyncio
 import logging
 import re
 from typing import Any
+import random
 
+import time
 from bs4 import BeautifulSoup
 
 from product.scraper.base_paginated_scraper import BasePaginatedScraper
@@ -15,10 +17,19 @@ logger = logging.getLogger("RyansScraper")
 
 class RyansScraper(BasePaginatedScraper):
     def __init__(self):
-        super().__init__(name="Ryans", logger=logger, max_retries=3, retry_delay=2)
+        super().__init__(
+            name="Ryans",
+            logger=logger,
+            max_retries=3,
+            retry_delay=2,
+            max_concurrent_categories=1,
+            inter_page_delay=(15, 30),
+            inter_category_delay=(60, 120),
+            fetcher_restart_interval=10,
+        )
 
     def all_categories(self):
-        return list(Category.objects.filter(site__name=self.name).select_related("site"))
+        return list(Category.objects.filter(site__name=self.name, subcategories__isnull=True, is_active=True).select_related("site"))
         # return list(Category.objects.filter(url="https://www.ryans.com/category/desktop-component-processor").select_related("site"))
 
     async def create_fetcher(self) -> PlaywrightClientFetcher:
@@ -61,6 +72,9 @@ class RyansScraper(BasePaginatedScraper):
             return ""
 
     def parse_products(self, soup: BeautifulSoup) -> list[dict[str, Any]]:
+        delay = random.uniform(*self.inter_page_delay)
+        self.logger.info("Waiting %.1fs before next page...", delay)
+        time.sleep(delay)
         products: list[dict[str, Any]] = []
         try:
             container = soup.find("div", class_="product-category-card")

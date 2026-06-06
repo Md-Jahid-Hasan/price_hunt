@@ -1,4 +1,5 @@
 import re
+import hashlib
 from datetime import timedelta
 from django.utils import timezone
 
@@ -9,6 +10,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.status import HTTP_200_OK, HTTP_400_BAD_REQUEST
 from rest_framework import status
+from django.core.cache import cache
 
 from product.models import Product, Category
 from product.models import PriceHistory
@@ -17,12 +19,16 @@ from comparison.tokens import generate_comparison_token
 from comparison.permissions import ComparisonTokenPermission
 
 
-MAX_PRODUCT_IDS = 50
 HISTORY_DAYS = 62  # ~2 months
 
 
 def home_page(request):
     return render(request, 'home_page.html')
+
+def _make_cache_key(q_normalized: str) -> str:
+    # Hash to avoid long keys and use a stable namespace
+    h = hashlib.sha1(q_normalized.encode("utf-8")).hexdigest()
+    return h
 
 
 class ProductComparisonView(APIView):
@@ -55,31 +61,36 @@ class ProductComparisonView(APIView):
         if not query:
             return Response({"error": "Product name is required"}, status=HTTP_400_BAD_REQUEST)
 
-        words = query.lower().split()
-        words_norm = [slugify(w) for w in words if w]
-        related_categories = self.fetch_related_category(words_norm)
+        results = cache.get(slugify(query))
 
-        # Build query: product name contains ALL query words (improved from icontains)
-        product_query = self.build_product_query(words_norm)
+        if results is None:
+            words = query.lower().split()
+            words_norm = [slugify(w) for w in words if w]
+            related_categories = self.fetch_related_category(words_norm)
 
-        products = list(
-            Product.objects
-            .filter(product_query, category__in=related_categories)
-            .select_related('site', 'category')
-            .order_by('site__name', 'price')
-        )
+            # Build query: product name contains ALL query words (improved from icontains)
+            product_query = self.build_product_query(words_norm)
 
-        results: dict[str, list] = {}
-        for product in products:
-            site_name = product.site.name if product.site else "Unknown"
-            results.setdefault(site_name, []).append({
-                "id": product.id,
-                "name": product.name,
-                "url": product.url,
-                "price": str(product.price),
-                "description": product.description,
-                "category": product.category.name if product.category else "",
-            })
+            products = list(
+                Product.objects
+                .filter(product_query, category__in=related_categories)
+                .select_related('site', 'category')
+                .order_by('site__name', 'price')
+            )
+
+            results: dict[str, list] = {}
+            for product in products:
+                site_name = product.site.name if product.site else "Unknown"
+                results.setdefault(site_name, []).append({
+                    "id": product.id,
+                    "name": product.name,
+                    "url": product.url,
+                    "price": str(product.price),
+                    "description": product.description,
+                    "category": product.category.name if product.category else "",
+                })
+
+            cache.add(slugify(query), results, timeout=6 * 60 * 60)  # Cache results for 6 hours
 
         all_ids = [p["id"] for site_products in results.values() for p in site_products]
         history_token = generate_comparison_token(all_ids) if all_ids else None
@@ -123,42 +134,49 @@ class PriceHistoryView(APIView):
 
     def get(self, request):
         raw_ids = request.query_params.get("ids", "").strip()
+
         if not raw_ids:
             return Response(
                 {"error": "Query parameter 'ids' is required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        cache_key = _make_cache_key(raw_ids)
+        result = cache.get(cache_key)
 
-        product_ids = self._parse_ids(raw_ids)
-        if product_ids is None:
-            return Response(
-                {"error": "All product IDs must be positive integers."},
-                status=status.HTTP_400_BAD_REQUEST,
+        if result is None:
+            product_ids = self._parse_ids(raw_ids)
+
+            if product_ids is None:
+                return Response(
+                    {"error": "All product IDs must be positive integers."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            cutoff = timezone.now() - timedelta(days=HISTORY_DAYS)
+
+            # Single query — the composite index (product_id, recorded_at DESC) makes this
+            # efficient even on a very large table: index range scan per product, no seq scan.
+            rows = (
+                PriceHistory.objects.filter(
+                    product_id__in=product_ids,
+                    recorded_at__gte=cutoff,
+                )
+                .values("product_id", "price", "recorded_at")
+                .order_by("product_id", "-recorded_at")
             )
 
-        cutoff = timezone.now() - timedelta(days=HISTORY_DAYS)
+            # Pre-populate all requested IDs so missing products appear as empty lists
+            result: dict[str, list] = {str(pid): [] for pid in product_ids}
 
-        # Single query — the composite index (product_id, recorded_at DESC) makes this
-        # efficient even on a very large table: index range scan per product, no seq scan.
-        rows = (
-            PriceHistory.objects.filter(
-                product_id__in=product_ids,
-                recorded_at__gte=cutoff,
-            )
-            .values("product_id", "price", "recorded_at")
-            .order_by("product_id", "-recorded_at")
-        )
+            for row in rows:
+                key = str(row["product_id"])
+                result[key].append(
+                    PricePointSerializer(
+                        {"price": row["price"], "recorded_at": row["recorded_at"]}
+                    ).data
+                )
 
-        # Pre-populate all requested IDs so missing products appear as empty lists
-        result: dict[str, list] = {str(pid): [] for pid in product_ids}
-
-        for row in rows:
-            key = str(row["product_id"])
-            result[key].append(
-                PricePointSerializer(
-                    {"price": row["price"], "recorded_at": row["recorded_at"]}
-                ).data
-            )
+            cache.add(cache_key, result, timeout=6 * 60 * 60)  # cache for 6 hours
 
         return Response(result, status=status.HTTP_200_OK)
 

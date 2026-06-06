@@ -4,7 +4,7 @@ let filteredProducts = [];
 let currentSort = 'price-low';
 let currentAvailability = 'all';
 let currentPage = 1;
-const ITEMS_PER_PAGE = 12;
+const ITEMS_PER_PAGE = 20;
 
 let historyToken = null;            // single-use token issued by the comparison API
 let priceHistoryCache = {};         // { "<productId>": [points] } — populated once per search
@@ -21,7 +21,7 @@ function formatPrice(priceStr) {
     return '৳ ' + Math.round(num).toLocaleString();
 }
 
-// Search functionality
+// Search functionality, get all products from the API, then delegate to displayResults() for rendering and pagination setup
 async function searchProducts() {
     const searchInput = document.getElementById('searchInput');
     const query = searchInput.value.trim();
@@ -63,7 +63,7 @@ function displayResults(data) {
         return;
     }
 
-    // API now returns { results: { site: [...] }, history_token: "..." }
+    // API returns { results: { site: [...] }, history_token: "..." }
     const siteResults = data.results || {};
     historyToken = data.history_token || null;
     priceHistoryCache = {};
@@ -85,13 +85,6 @@ function displayResults(data) {
     if (allProducts.length === 0) {
         document.getElementById('emptyState').style.display = 'block';
         return;
-    }
-
-    // Fetch price history for ALL products in one request using the single-use token.
-    // Results are cached so subsequent pages (Load More) paint instantly without a new request.
-    if (historyToken) {
-        const allIds = allProducts.map(p => p.id).filter(Boolean);
-        if (allIds.length) fetchAllPriceHistory(allIds, historyToken);
     }
 
     populateStoreFilter();
@@ -187,7 +180,13 @@ function renderPage() {
     const batch = filteredProducts.slice(start, end);
     const grid = document.getElementById('productsGrid');
 
+    // Fetch price history for batch products in one request using the single-use token.
+    if (historyToken) {
+        const allIds = batch.map(p => p.id).filter(Boolean);
+        if (allIds.length) fetchAllPriceHistory(allIds, historyToken);
+    }
     batch.forEach(p => grid.appendChild(createProductCard(p)));
+
     renderLoadMoreBtn(end < total, end, total);
 
     // Paint from cache if history already arrived; if the fetch is still in-flight,

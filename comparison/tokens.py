@@ -25,7 +25,7 @@ def validate_and_consume_token(token: str, requested_ids: list[int]) -> None:
     """
     Validate the token exists, hasn't expired, and that all requested_ids are
     within the set of IDs the token was issued for. Deletes the token on success
-    (single-use). Raises TokenValidationError with a descriptive message on failure.
+    (fetch all product history). Raises TokenValidationError with a descriptive message on failure.
     """
     if not token:
         raise TokenValidationError(
@@ -44,6 +44,10 @@ def validate_and_consume_token(token: str, requested_ids: list[int]) -> None:
             "Requested IDs are not covered by this token. "
             "Only IDs returned by the comparison can be queried."
         )
-
-    # Consume: delete token so it cannot be reused
-    cache.delete(_CACHE_PREFIX + token)
+    else:
+        # if requested ids is subset of allowed ids, then remove requested ids from allowed ids and update cache with remaining allowed ids
+        remaining_ids = sorted(set(allowed_ids) - set(requested_ids))
+        if remaining_ids:
+            cache.set(_CACHE_PREFIX + token, remaining_ids, timeout=TTL)
+        else:
+            cache.delete(_CACHE_PREFIX + token)

@@ -57,3 +57,16 @@ def scrape_ucc_bd(self):
     except Exception as exc:
         logger.error("UCC BD scrape failed: %s", exc)
         raise self.retry(exc=exc)
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, queue="potaka_it_queue")
+def scrape_potaka_it(self):
+    from product.scraper.potaka_it_scraper import PotakaITScraper
+    try:
+        results = async_to_sync(PotakaITScraper().scrape)()
+        total = sum(len(r) for r in results)
+        logger.info("Potaka IT scrape complete: %s products across %s categories", total, len(results))
+        return {"categories": len(results), "total_products": total}
+    except Exception as exc:
+        logger.error("Potaka IT scrape failed: %s", exc)
+        raise self.retry(exc=exc)

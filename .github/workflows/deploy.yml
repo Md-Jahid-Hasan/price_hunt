@@ -32,7 +32,7 @@ jobs:
             set -e
             
             # Navigate to app directory
-            cd /home/jahid/price_hun
+            cd /home/jahid/price_hunt
             
             # Pull latest code from version_2 branch
             git fetch origin version_2

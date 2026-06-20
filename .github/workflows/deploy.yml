@@ -13,7 +13,11 @@ on:
 jobs:
   deploy:
     # Only run on push or when PR is merged into version_2
-    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.merged)
+    # if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.merged)
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.ref == 'refs/heads/version_2' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'version_2')
 
     runs-on: ubuntu-latest
 

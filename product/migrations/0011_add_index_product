@@ -1,0 +1,21 @@
+# new migration
+from django.db import migrations
+from pgvector.django import HnswIndex
+
+
+class Migration(migrations.Migration):
+    dependencies = [
+        ("product", "0010_nullable_category_url"),
+    ]
+    operations = [
+        migrations.AddIndex(
+            model_name="productembedding",
+            index=HnswIndex(
+                name="product_embedding_hnsw_idx",
+                fields=["vector"],
+                m=16,
+                ef_construction=64,
+                opclasses=["vector_cosine_ops"],
+            ),
+        ),
+    ]

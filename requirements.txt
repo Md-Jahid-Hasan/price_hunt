@@ -35,3 +35,5 @@ uvicorn==0.34.3
 yarl==1.18.3
 celery[redis]==5.4.0
 django-redis==6.0.0
+django_celery_beat
+pgvector

@@ -31,6 +31,11 @@ DEBUG = True
 
 ALLOWED_HOSTS = os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",")
 
+# Ollama api settings
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
+EMBEDDING_MODEL = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
+OLLAMA_CHAT_MODEL = os.getenv("OLLAMA_CHAT_MODEL", "llama3.1:8b")
+
 # Application definition
 
 INSTALLED_APPS = [
@@ -104,11 +109,17 @@ COMPARISON_TOKEN_TTL = 300
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('POSTGRES_DB', 'price_data'),
-        'USER': os.getenv('POSTGRES_USER', 'postgres'),
-        'PASSWORD': os.getenv('POSTGRES_PASSWORD', 'postgres'),
-        'HOST': os.getenv('POSTGRES_HOST', 'localhost'),
-        'PORT': os.getenv('POSTGRES_PORT', '5432'),
+        # 'NAME': os.getenv('POSTGRES_DB', 'price_data'),
+        # 'USER': os.getenv('POSTGRES_USER', 'postgres'),
+        # 'PASSWORD': os.getenv('POSTGRES_PASSWORD', 'postgres'),
+        # 'HOST': os.getenv('POSTGRES_HOST', 'localhost'),
+        # 'PORT': os.getenv('POSTGRES_PORT', '5432'),
+
+        'NAME': os.getenv('DATABASE_NAME', 'price_data'),
+        'USER': os.getenv('DATABASE_USERNAME', 'postgres'),
+        'PASSWORD': os.getenv('DATABASE_PASSWORD', 'postgres'),
+        'HOST': os.getenv('DATABASE_HOST', 'localhost'),
+        'PORT': os.getenv('DATABASE_PORT', '5432'),
     }
 }
 
@@ -262,6 +273,7 @@ CELERY_TASK_ROUTES = {
     "product.tasks.scrape_techland": {"queue": "techland_queue"},
     "product.tasks.scrape_ucc_bd": {"queue": "ucc_bd_queue"},
     "product.tasks.scrape_potaka_it": {"queue": "potaka_it_queue"},
+    "product.tasks.embed_product_task": {"queue": "embedding_queue"},
 }
 
 CELERY_BEAT_SCHEDULE = {

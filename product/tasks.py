@@ -3,6 +3,7 @@ import queue
 
 from asgiref.sync import async_to_sync
 from celery import shared_task
+from .services.embedding import embed_product, OllamaEmbeddingError
 
 logger = logging.getLogger(__name__)
 
@@ -70,3 +71,15 @@ def scrape_potaka_it(self):
     except Exception as exc:
         logger.error("Potaka IT scrape failed: %s", exc)
         raise self.retry(exc=exc)
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=10, queue="embedding_queue")
+def embed_product_task(self, product_id):
+    from product.models import Product
+    try:
+        product = Product.objects.select_related('category', 'site').get(id=product_id)
+        embed_product(product)
+    except OllamaEmbeddingError as exc:
+        logger.warning(f"Embedding failed for product {product_id}: {exc}. Retrying...")
+        raise self.retry(exc=exc)
+    except Product.DoesNotExist:
+        logger.error(f"Product with ID {product_id} does not exist.")
